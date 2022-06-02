@@ -1,0 +1,5 @@
+from colordict import ColorDict
+f = open("C:\\Users\\zakar\\Desktop\\Color.txt", "w")
+for i,j in ColorDict().items() :
+    f.write(f"background-color:rgb{j[0],j[1],j[2]};"+f"     /* {i} */\n")
+f.close()

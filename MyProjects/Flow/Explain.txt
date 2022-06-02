@@ -1,0 +1,192 @@
+Solves the equation of interior fluid motion over a step.
+This will simulate the inflow behavior into the pipe and the
+boundary layer developing over time and space as well as the vortex
+that is being created right after the step. The system of equations
+is solved using a Staggered Grid, Finite Differences (almost Finite
+Volume), explicit Euler time-stepping and a P2 pressure correction
+scheme (very similar to the SIMPLE algorithm).
+
+
+Momentum:           ∂u/∂t + (u ⋅ ∇) u = − 1/ρ ∇p + ν ∇²u + f
+
+Incompressibility:  ∇ ⋅ u = 0
+
+
+u:  Velocity (2d vector)
+p:  Pressure
+f:  Forcing (here =0)
+ν:  Kinematic Viscosity
+ρ:  Density (here =1)
+t:  Time
+∇:  Nabla operator (defining nonlinear convection, gradient and divergence)
+∇²: Laplace Operator
+
+--------
+
+Scenario
+
+
+                        wall: u=0, v=0
+        +-----------------------------------------------+
+ inflow |  -->      -->       -->        -->      -->   |
+ u = 1  |                                               | outflow
+ v = 0  |  -->      -->       -->        -->      -->   | ∂u/∂x = 0
+        +--------------+                                | ∂v/∂x = 0
+        |//// step ////|                                |
+        +-----------------------------------------------+
+                        wall: u=0, v=0                       
+
+-> A rectangular domain
+-> Top and bottom edge represent wall boundary conditions
+-> In the bottom-left a step modifies the flow
+-> The left edge above the step is an inflow with uniform profile
+   for the u velocity
+-> The entire right edge is an outflow out of the domain
+-> The edges around the step are also wall boundary conditions
+-> The flow is initialized with u=1 in the part of the domain, which
+   is above an imaginary line over the step
+-> The bottom right of the domain is initialized as zero in both
+   velocity directions
+
+--------
+
+Expected Outcome
+
+        +-----------------------------------------------+
+        | --->     ->         ->  🔄      ->      ->     |
+        | --->     ---->    ⋱                          |
+        | --->     ->         --->       --->    --->   |
+        +--------------+    ⋱                          |
+        |//// step ////| 🔄   ->         ->      ->     |
+        +-----------------------------------------------+
+
+
+Above the step, the flow is developing the Hagen-Poiseuille
+profile, which is characteristic for pipe flow.
+
+After the step, the flow adjusts to be over the entire 
+crosssection of the pipe and develops the parabolic profile
+over the wider diameter.
+
+Towards the end of the domain, the flow is fully developped
+and adheres to the outflow boundary condition.
+
+The 🔄 indicates spot, in which vortices develop depending
+on the investigated Reynolds Number.
+
+-------
+
+The staggered grid with ghost cells
+
+(see https://youtu.be/rV8tD2nQfkk &
+https://github.com/Ceyron/machine-learning-and-simulation/blob/main/english/simulation_scripts/pipe_flow_with_inlet_and_outlet_python.py
+for more details)
+
+        |       |       |       |       |       |       |    
+    •   →   •   →   •   →   •   →   •   →   •   →   •   →   •
+    ↑ - ❖---↑---❖---↑---❖---↑---❖---↑---❖---↑---❖---↑---❖ - ↑
+        |       |       |       |       |       |       |    
+    •   →   •   →   •   →   •   →   •   →   •   →   •   →   •
+        |       |       |       |       |       |       |    
+    ↑ - ❖ - ↑ - + - ↑ - + - ↑ - + - ↑ - + - ↑ - + - ↑ - ❖ - ↑
+        |       |       |       |       |       |       |    
+    •   →   •   →   •   →   •   →   •   →   •   →   •   →   •
+        |       |       |       |       |       |       |    
+    ↑ - ❖ - ↑ - ❖ - ↑ - ❖ - ↑ - ❖ - ↑ - ❖ - ↑ - + - ↑ - ❖ - ↑
+        |       |       |       |       |       |       |    
+    •   →   •   →   •   →   •   →   • - →   •   →   •   →   •
+                                        |       |       |    
+    ↑ - +   ↑   +   ↑   +   ↑   +   ↑ - ❖ - ↑ - + - ↑ - ❖ - ↑
+                                        |       |       |    
+    •   →   •   →   •   →   •   →   •   →   •   →   •   →   •
+                                        |       |       |    
+    ↑ - 0   ↑   +   ↑   +   ↑   +   ↑ - ❖---↑---❖---↑---❖ - ↑
+                                        |       |       |    
+    •   →   •   →   •   →   •   →   •   →   •   →   •   →   •
+
+
+"❖" denotes grid vertices that are on the boundary. Everything
+outside of it, is called a ghost node. We need it to enforce the
+boundary condition, especially for the step. We keep the degrees
+of freedom inside the step for simplicity.
+
+* u_velocities use (N_y + 1) by N_x nodes
+* v_velocities use N_y by (N_x + 1) nodes
+* pressure use (N_y + 1) by (N_x + 1) nodes
+
+IMPORTANT: When taking derivatives make sure in which staggered
+grid you are thinking.
+
+-----
+
+Solution Strategy:
+
+Usage of a P2 pressure correction scheme (very similar to the SIMPLE
+algorithm)
+
+0. Initialization
+
+    0.1 Initialize the u velocity 
+
+    0.2 Initialize the v velocity 
+
+    0.3 Initialize the p (=pressure) uniformly with zeros
+
+1. Update the u velocities (+ Boundary Conditions)
+
+    u ← u + dt ⋅ (− ∂p/∂x + ν ∇²u − ∂u²/∂x − v ∂u/∂y)
+
+2. Update the v velocities (+ Boundary Conditions)
+
+    v ← v + dt ⋅ (− ∂p/∂y + ν ∇²v − u ∂v/∂x − ∂v²/∂y)
+
+3. Compute the divergence of the tentative velocity components
+
+    d = ∂u/∂x + ∂v/∂y
+
+4. Solve a Poisson problem for the pressure correction q
+   (this problem has homogeneous Neumann BC everywhere except
+   for the right edge of the domain (the outlet))
+
+    solve   ∇²q = d / dt   for  q
+
+5. Update the pressure
+
+    p ← p + q
+
+6. Update the velocities to be incompressible
+
+    u ← u − dt ⋅ ∂q/∂x
+
+    v ← v − dt ⋅ ∂q/∂y
+
+7. Repeat time loop until steady-state is reached
+
+
+For visualizations the velocities have to mapped to the
+original vertex-centered grid.
+
+The flow might require a correction at the outlet to ensure
+continuity over the entire domain.
+
+The density is assumed to be 1.0
+
+-----
+
+Notes on stability:
+
+1. We are using an explicit diffusion treatment (FTCS) which
+   has the stability condition:
+
+   (ν dt) / (dx²) ≤ 1/2
+
+2. We are using a central difference approximation for the
+   convection term which is only stable if the diffusive
+   transport is dominant (i.e., do not select the kinematic
+   viscosity too low).
+
+3. The Pressure Poisson (correction) problem is solved using
+   Jacobi smoothing. This is sufficient for this simple
+   application, but due to the fixed number of iterations
+   does not ensure the residual is sufficiently small. That 
+   could introduce local compressibility.
